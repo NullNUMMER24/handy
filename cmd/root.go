@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var ProjectFiles string = "." // This defines where all the files are getting stored
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "handy-cli",

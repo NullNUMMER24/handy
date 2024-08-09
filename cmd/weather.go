@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -68,8 +69,6 @@ var WeatherAPIKey string = "uzxuk8FTWTE1M9mTctZ5kFFY2PV8oqca"
 
 func GetWeatherData(location string) {
 	var weather Response
-	// Long, Lat, err := GetLongAndLatFromLocation(location)
-
 	response, err := http.Get(fmt.Sprintf("https://api.tomorrow.io/v4/weather/forecast?location=%s&timesteps=1h&apikey=%s", url.QueryEscape(location), WeatherAPIKey))
 
 	if err != nil {
@@ -82,7 +81,40 @@ func GetWeatherData(location string) {
 	} else {
 		json.Unmarshal(responseData, &weather)
 	}
-	fmt.Printf("The current temperature in %s is %.2f°C.\n", weather.Location.Name, weather.Timelines.Hourly.Temperature-273.15)
+
+	var closestTime string
+	var closestTemp float64
+	var minDiff time.Duration = time.Hour * 24 // initialize with a large value
+
+	currentTime, err := time.Parse("2006-01-02T15:04:00Z", time.Now().Format("2006-01-02T15:04:00Z"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	for _, hourly := range weather.Timelines.Hourly {
+		t, err := time.Parse("2006-01-02T15:04:00Z", hourly.Time)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		diff := t.Sub(currentTime)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff < minDiff {
+			minDiff = diff
+			closestTime = hourly.Time
+			closestTemp = hourly.Values.Temperature
+		}
+	}
+	t, err := time.Parse("2006-01-02T15:04:00Z", closestTime)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	humanReadableTime := t.Format("15:04, Monday, January 2")
+	fmt.Printf("The current temperature in %s at %s is %.2f°C.\n", weather.Location.Name, humanReadableTime, closestTemp) //-273.15
 }
 
 func init() {
@@ -93,7 +125,7 @@ func init() {
 }
 
 var GetWeather = &cobra.Command{
-	Use:   "weather",
+	Use:   "weather <location>",
 	Short: "Displays the weather of a location",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
