@@ -6,7 +6,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"time"
@@ -15,14 +14,13 @@ import (
 )
 
 type StandingTimer struct {
-	Date    string   `json:"date"`
-	Records []Record `json:"records"`
+	Date         string        `json:"date"`
+	LastStart    string        `json:"last_start"`
+	TimeStanding time.Duration `json:"time_standing"`
+	Breaks       int           `json:"breaks"`
 }
 
-type Record struct {
-	StartTime string `json:"start_time"`
-	StopTime  string `json:"stop_time"`
-}
+var NewEntry StandingTimer
 
 // StandingTimerCmd represents the StandingTimer command
 var StandingTimerCmd = &cobra.Command{
@@ -41,19 +39,35 @@ var StartStandingTimerCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Starts the timer",
 	Run: func(cmd *cobra.Command, args []string) {
-		standingTimer, err := loadStandingTimer()
-		if err != nil {
-			log.Fatal(err)
-		}
-		newRecord := Record{
-			StartTime: time.Now().Format(time.RFC3339),
-		}
-		standingTimer.addRecord(newRecord)
-		err = saveStandingTimer(standingTimer)
+		existingData, err := loadStandingTimer()
 		if err != nil {
 			log.Fatal(err)
 		}
 
+		if existingData.Date == time.Now().Format("2006-01-02") {
+			NewEntry = StandingTimer{
+				Date:         time.Now().Format("2006-01-02"),
+				LastStart:    time.Now().Format("15:04:03"),
+				TimeStanding: existingData.TimeStanding,
+				Breaks:       existingData.Breaks + 1,
+			}
+		} else {
+			NewEntry = StandingTimer{
+				Date:      time.Now().Format("2006-01-02"),
+				LastStart: time.Now().Format("15:04:03"),
+				Breaks:    0,
+			}
+		}
+
+		newEntryJson, err := json.MarshalIndent(NewEntry, "", "  ")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = os.WriteFile(fmt.Sprintf("%s/StandingTimer.json", ProjectFiles), newEntryJson, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
 	},
 }
 
@@ -61,17 +75,53 @@ var StopStandingTimerCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stops the timer",
 	Run: func(cmd *cobra.Command, args []string) {
-		standingTimer, err := loadStandingTimer()
+		existingData, err := loadStandingTimer()
 		if err != nil {
 			log.Fatal(err)
 		}
-		latestRecord := standingTimer.getLatestRecord()
-		if latestRecord != nil {
-			latestRecord.StopTime = time.Now().Format(time.RFC3339)
-			err = saveStandingTimer(standingTimer)
-			if err != nil {
-				log.Fatal(err)
+		startTime, _ := time.Parse("2006-01-02 15:04", existingData.Date+" "+existingData.LastStart)
+		endTime := time.Now()
+		totalTime := endTime.Sub(startTime)
+		if existingData.Date == time.Now().Format("2006-01-02") {
+			NewEntry = StandingTimer{
+				Date:         time.Now().Format("2006-01-02"),
+				LastStart:    existingData.LastStart,
+				TimeStanding: existingData.TimeStanding + totalTime,
+				Breaks:       existingData.Breaks + 1,
 			}
+		} else {
+			NewEntry = StandingTimer{
+				Date:         time.Now().Format("2006-01-02"),
+				LastStart:    time.Now().Format("15:04:03"),
+				TimeStanding: totalTime,
+				Breaks:       1,
+			}
+		}
+
+		// Convert TimeStanding to seconds
+		seconds := int(NewEntry.TimeStanding.Seconds())
+
+		// Create a temporary struct to hold the data
+		tempStruct := struct {
+			Date         string `json:"date"`
+			LastStart    string `json:"last_start"`
+			TimeStanding int    `json:"time_standing"`
+			Breaks       int    `json:"breaks"`
+		}{
+			Date:         NewEntry.Date,
+			LastStart:    NewEntry.LastStart,
+			TimeStanding: seconds,
+			Breaks:       NewEntry.Breaks,
+		}
+
+		// Marshal the temporary struct to JSON
+		newEntryJson, err := json.MarshalIndent(tempStruct, "", "  ")
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = os.WriteFile(fmt.Sprintf("%s/StandingTimer.json", ProjectFiles), newEntryJson, 0644)
+		if err != nil {
+			log.Fatal(err)
 		}
 	},
 }
@@ -79,38 +129,31 @@ var StopStandingTimerCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(StandingTimerCmd)
 	StandingTimerCmd.AddCommand(StartStandingTimerCmd)
-	StandingTimerCmd.AddCommand(StopStandingTimerCmd)
+	// StandingTimerCmd.AddCommand(StopStandingTimerCmd)
 
 }
 
 func loadStandingTimer() (StandingTimer, error) {
-	data, err := ioutil.ReadFile(fmt.Sprintf("%s/StandingTimer.json", ProjectFiles))
+	filePath := fmt.Sprintf("%s/StandingTimer.json", ProjectFiles)
+	_, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return StandingTimer{}, nil
+		} else {
+			return StandingTimer{}, err
+		}
+	}
+
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return StandingTimer{}, err
 	}
-	var standingTimer StandingTimer
-	err = json.Unmarshal(data, &standingTimer)
-	return standingTimer, err
-}
 
-func (st *StandingTimer) addRecord(record Record) {
-	st.Records = append(st.Records, record)
-}
-
-func (st *StandingTimer) getLatestRecord() *Record {
-	for i := len(st.Records) - 1; i >= 0; i-- {
-		if st.Records[i].StopTime == "" {
-			return &st.Records[i]
-		}
-	}
-	return nil
-}
-
-func saveStandingTimer(standingTimer StandingTimer) error {
-	data, err := json.MarshalIndent(standingTimer, "", "  ")
+	var existingData StandingTimer
+	err = json.Unmarshal(data, &existingData)
 	if err != nil {
-		return err
+		return StandingTimer{}, err
 	}
-	err = ioutil.WriteFile(fmt.Sprintf("%s/StandingTimer.json", ProjectFiles), data, 0644)
-	return err
+
+	return existingData, nil
 }
