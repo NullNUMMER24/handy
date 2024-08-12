@@ -10,6 +10,8 @@ import (
 )
 
 var ProjectFiles string = "." // This defines where all the files are getting stored
+var ErrorColor string = "\033[38;5;9m"
+var NoColor string = "\033[0m"
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
